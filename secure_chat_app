@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+#Secure chat application
+import socket
+import sys
+import time
+from _thread import *
+from datetime import datetime
+import threading
+import subprocess
+import argparse
+
+PORT = 7129
+RECVSIZE = 1024
+
+def server():
+    print("This is server")
+    s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
+    s_socket.bind((b'',PORT,0,0))
+    print("Listening on port ",PORT)
+    s_socket.listen()
+    connection, address = s_socket.accept()
+    msg = connection.recv(RECVSIZE)
+    print(msg.decode())
+    connection.sendall("Hi from server".encode())
+    while True:
+        msg = connection.recv(1024).decode()
+        print('Client : {}'.format(msg))
+        if msg == 'quit':
+            break
+        msg = input('Server : ')
+        connection.sendall(msg.encode())
+        if msg == 'quit':
+            break
+    connection.close()
+    s_socket.close()
+
+def client(hostname):
+    hostinfo = socket.getaddrinfo(hostname, PORT)[0][4]
+    print(hostinfo)
+    if len(hostinfo) == 2:
+        c_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+        c_socket.connect(hostinfo)
+    elif len(hostinfo) == 4:
+        c_socket = socket.socket(socket.AF_INET6,socket.SOCK_STREAM)
+        c_socket.connect(hostinfo)
+
+    c_socket.sendall("Hi from client".encode())
+    msg = c_socket.recv(RECVSIZE)
+    print(msg.decode())
+    while True:
+        msg = input("Client : ")
+        c_socket.sendall(msg.encode())
+        if msg == 'quit':
+            break
+        msg = c_socket.recv(RECVSIZE).decode()
+        print("{} : {}".format(hostname,msg))
+        if msg == 'quit':
+            break
+    c_socket.close()
+
+
+if __name__ == '__main__':
+
+    if len(sys.argv) != 2 and len(sys.argv) != 3:
+        print("Usage : {0} -s \n\t{0} -c <hostname>".format(sys.argv[0]))
+        sys.exit(1)
+    if sys.argv[1] == '-s':
+        server()
+    elif sys.argv[1] == '-c' and len(sys.argv) == 3:
+        print("This is client connecting to {}".format(sys.argv[2]))
+        client(sys.argv[2])
+    else:
+        print("Usage : {0} -s \n\t{0} -c <hostname>".format(sys.argv[0]))
+        sys.exit(1)
+    
+    
