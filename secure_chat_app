@@ -12,6 +12,24 @@ import argparse
 PORT = 7129
 RECVSIZE = 1024
 
+def client_receiving(name, sock):
+    while True:
+        msg = sock.recv(RECVSIZE).decode()
+        print("\n{} : {}".format(name, msg))
+        if msg == 'quit':
+            #sock.close()
+            break
+    #sys.exit()
+
+def server_receiving(name, connection):
+    while True:
+        msg = connection.recv(RECVSIZE).decode()
+        print("\n{} : {}".format(name, msg))
+        if msg == 'quit':
+            #connection.close()
+            break
+    #sys.exit()
+
 def server():
     print("This is server")
     s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
@@ -22,11 +40,8 @@ def server():
     msg = connection.recv(RECVSIZE)
     print(msg.decode())
     connection.sendall("Hi from server".encode())
+    start_new_thread(server_receiving,('Client',connection))
     while True:
-        msg = connection.recv(1024).decode()
-        print('Client : {}'.format(msg))
-        if msg == 'quit':
-            break
         msg = input('Server : ')
         connection.sendall(msg.encode())
         if msg == 'quit':
@@ -47,13 +62,10 @@ def client(hostname):
     c_socket.sendall("Hi from client".encode())
     msg = c_socket.recv(RECVSIZE)
     print(msg.decode())
+    start_new_thread(client_receiving,('Server',c_socket))
     while True:
         msg = input("Client : ")
         c_socket.sendall(msg.encode())
-        if msg == 'quit':
-            break
-        msg = c_socket.recv(RECVSIZE).decode()
-        print("{} : {}".format(hostname,msg))
         if msg == 'quit':
             break
     c_socket.close()
