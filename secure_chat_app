@@ -8,13 +8,18 @@ from datetime import datetime
 import threading
 import subprocess
 import argparse
+import ssl
 
 PORT = 7129
 RECVSIZE = 1024
 
 def client_receiving(name, sock):
     while True:
-        msg = sock.recv(RECVSIZE).decode()
+        msg = sock.recv(RECVSIZE)
+        if msg == b'':
+            raise RuntimeError("socket connection broken")
+            return
+        msg = msg.decode()
         print("\n{} : {}".format(name, msg))
         if msg == 'quit':
             #sock.close()
@@ -23,7 +28,11 @@ def client_receiving(name, sock):
 
 def server_receiving(name, connection):
     while True:
-        msg = connection.recv(RECVSIZE).decode()
+        msg = connection.recv(RECVSIZE)
+        if msg == b'':
+            raise RuntimeError("socket connection broken")
+            return
+        msg = msg.decode()
         print("\n{} : {}".format(name, msg))
         if msg == 'quit':
             #connection.close()
@@ -31,44 +40,85 @@ def server_receiving(name, connection):
     #sys.exit()
 
 def server():
-    print("This is server")
     s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
     s_socket.bind((b'',PORT,0,0))
-    print("Listening on port ",PORT)
+    print("Server listening on port ",PORT)
     s_socket.listen()
+
     connection, address = s_socket.accept()
-    msg = connection.recv(RECVSIZE)
-    print(msg.decode())
-    connection.sendall("Hi from server".encode())
-    start_new_thread(server_receiving,('Client',connection))
+
     while True:
-        msg = input('Server : ')
-        connection.sendall(msg.encode())
-        if msg == 'quit':
+        msg = connection.recv(RECVSIZE).decode()
+        if msg == "chat_hello":
+            connection.sendall("chat_reply".encode())
             break
-    connection.close()
-    s_socket.close()
+    print("Connection established with client")
+
+
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(certfile="bob.crt", keyfile="bob-key.pem")
+
+    connssl = context.wrap_socket(connection, server_side=True)
+    try:
+        start_new_thread(server_receiving,('Client',connssl))
+        while True:
+            msg = input('Server : ')
+            connssl.sendall(msg.encode())
+            if msg == 'quit':
+                break
+    except Exception as e:
+        print("Exception encountered: ",e)
+    finally:
+        try:
+            connssl.shutdown(socket.SHUT_RDWR)
+            connssl.close()
+            s_socket.close()
+        except:
+            pass
+
 
 def client(hostname):
     hostinfo = socket.getaddrinfo(hostname, PORT)[0][4]
-    print(hostinfo)
+
     if len(hostinfo) == 2:
         c_socket = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
-        c_socket.connect(hostinfo)
+
     elif len(hostinfo) == 4:
         c_socket = socket.socket(socket.AF_INET6,socket.SOCK_STREAM)
-        c_socket.connect(hostinfo)
 
-    c_socket.sendall("Hi from client".encode())
-    msg = c_socket.recv(RECVSIZE)
-    print(msg.decode())
-    start_new_thread(client_receiving,('Server',c_socket))
-    while True:
-        msg = input("Client : ")
-        c_socket.sendall(msg.encode())
-        if msg == 'quit':
-            break
-    c_socket.close()
+
+    c_socket.connect(hostinfo)
+    c_socket.sendall("chat_hello".encode())
+    msg = c_socket.recv(RECVSIZE).decode()
+    if msg == "chat_reply":
+        print("Connection established with ",hostname)
+    else:
+        print("Connection failed with ", hostname)
+        sys.exit(0)
+    
+
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations("/root/root.crt")
+
+    connssl = context.wrap_socket(c_socket, server_hostname=hostname)
+    #connssl.connect(hostinfo)
+    try:
+        start_new_thread(client_receiving,('Server',connssl))
+        while True:
+            msg = input("Client : ")
+            connssl.sendall(msg.encode())
+            if msg == 'quit':
+                break
+    except Exception as e:
+        print("Exception encountered: ",e)
+    finally:
+        try:
+            connssl.shutdown(socket.SHUT_RDWR)
+            connssl.close()
+            c_socket.close()
+        except:
+            pass
 
 
 if __name__ == '__main__':
