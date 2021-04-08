@@ -27,7 +27,7 @@ def receiving(name, connection, active_status):
     while True:
         msg = connection.recv(RECVSIZE)
         if msg == b'':
-            raise RuntimeError("socket connection broken")
+            print("socket connection broken")
             active_status.unset()
             return
         msg = msg.decode()
@@ -90,7 +90,9 @@ def server():
             print("Starting secure communication")
             
             context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            context.load_verify_locations("/root/root.crt")
             context.load_cert_chain(certfile="bob.crt", keyfile="bob-key.pem")
+            context.verify_mode = ssl.CERT_REQUIRED
 
             connssl = context.wrap_socket(connection, server_side=True)
 
@@ -159,7 +161,7 @@ def client(hostname):
         communication(c_socket, 'Client', 'Server')
 
     else:
-        pass
+        print("Malformed message, exiting")
         #???
     try:
         c_socket.close()
