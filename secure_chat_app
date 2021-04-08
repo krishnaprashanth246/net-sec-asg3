@@ -13,31 +13,51 @@ import ssl
 PORT = 7129
 RECVSIZE = 1024
 
-def client_receiving(name, sock):
-    while True:
-        msg = sock.recv(RECVSIZE)
-        if msg == b'':
-            raise RuntimeError("socket connection broken")
-            return
-        msg = msg.decode()
-        print("\n{} : {}".format(name, msg))
-        if msg == 'quit':
-            #sock.close()
-            break
-    #sys.exit()
+class break_check:
+    flag = True
 
-def server_receiving(name, connection):
+    def set(self):
+        self.flag = True
+    def unset(self):
+        self.flag = False
+    def get(self):
+        return self.flag
+
+def receiving(name, connection, active_status):
     while True:
         msg = connection.recv(RECVSIZE)
         if msg == b'':
             raise RuntimeError("socket connection broken")
+            active_status.unset()
             return
         msg = msg.decode()
         print("\n{} : {}".format(name, msg))
-        if msg == 'quit':
+        if msg == 'chat_close':
             #connection.close()
+            active_status.unset()
             break
     #sys.exit()
+
+
+def communication(connection, peer1, peer2):
+    active_status = break_check()
+    try:
+        start_new_thread(receiving,(peer2,connection, active_status))
+        while active_status.get():
+            msg = input('{} : '.format(peer1))
+            connection.sendall(msg.encode())
+            if msg == 'chat_close':
+                break
+    except Exception as e:
+        print("Exception encountered: ",e)
+    finally:
+        try:
+            connection.shutdown(socket.SHUT_RDWR)
+            connection.close()
+        except:
+            pass
+
+
 
 def server():
     s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
@@ -47,6 +67,7 @@ def server():
 
     connection, address = s_socket.accept()
 
+    #application layer initial handshake
     while True:
         msg = connection.recv(RECVSIZE).decode()
         if msg == "chat_hello":
@@ -54,28 +75,40 @@ def server():
             break
     print("Connection established with client")
 
+    #secure chat starting handshake
+    
+    msg = connection.recv(RECVSIZE).decode()
 
-    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-    context.load_cert_chain(certfile="bob.crt", keyfile="bob-key.pem")
+    if msg == 'chat_STARTTLS':
+        connection.sendall("chat_STARTTLS_ACK".encode())
+        
+        msg = connection.recv(RECVSIZE).decode()
+        
+        # Three way handshake
+        if msg == 'chat_STARTTLS_ACK':        
+        
+            print("Starting secure communication")
+            
+            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            context.load_cert_chain(certfile="bob.crt", keyfile="bob-key.pem")
 
-    connssl = context.wrap_socket(connection, server_side=True)
+            connssl = context.wrap_socket(connection, server_side=True)
+
+            communication(connssl, 'Server', 'Client')
+
+        else :
+            print("Starting insecure communication")
+            print("Client : ", msg)
+            communication(connection, 'Server', 'Client')
+
+    else :
+        print("Starting insecure communication")
+        print("Client : ", msg)
+        communication(connection, 'Server', 'Client')
     try:
-        start_new_thread(server_receiving,('Client',connssl))
-        while True:
-            msg = input('Server : ')
-            connssl.sendall(msg.encode())
-            if msg == 'quit':
-                break
-    except Exception as e:
-        print("Exception encountered: ",e)
-    finally:
-        try:
-            connssl.shutdown(socket.SHUT_RDWR)
-            connssl.close()
-            s_socket.close()
-        except:
-            pass
-
+        s_socket.close()
+    except:
+        pass
 
 def client(hostname):
     hostinfo = socket.getaddrinfo(hostname, PORT)[0][4]
@@ -86,39 +119,52 @@ def client(hostname):
     elif len(hostinfo) == 4:
         c_socket = socket.socket(socket.AF_INET6,socket.SOCK_STREAM)
 
-
     c_socket.connect(hostinfo)
+
+    #application layer initial handshake
     c_socket.sendall("chat_hello".encode())
     msg = c_socket.recv(RECVSIZE).decode()
+
     if msg == "chat_reply":
         print("Connection established with ",hostname)
     else:
         print("Connection failed with ", hostname)
-        sys.exit(0)
-    
-
-
-    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.load_verify_locations("/root/root.crt")
-
-    connssl = context.wrap_socket(c_socket, server_hostname=hostname)
-    #connssl.connect(hostinfo)
-    try:
-        start_new_thread(client_receiving,('Server',connssl))
-        while True:
-            msg = input("Client : ")
-            connssl.sendall(msg.encode())
-            if msg == 'quit':
-                break
-    except Exception as e:
-        print("Exception encountered: ",e)
-    finally:
         try:
-            connssl.shutdown(socket.SHUT_RDWR)
-            connssl.close()
             c_socket.close()
         except:
             pass
+        sys.exit(0)
+    
+    #secure chat starting handshake
+    c_socket.sendall("chat_STARTTLS".encode())
+
+    msg = c_socket.recv(RECVSIZE).decode()
+
+    if msg == 'chat_STARTTLS_ACK':
+        
+        c_socket.sendall("chat_STARTTLS_ACK".encode())
+        print("Starting secure communication")
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations("/root/root.crt")
+        context.load_cert_chain(certfile="alice.crt", keyfile="alice-key.pem")
+
+        connssl = context.wrap_socket(c_socket, server_hostname=hostname)
+        #connssl.connect(hostinfo)
+        communication(connssl, 'Client', 'Server')
+
+    elif msg == 'chat_STARTTLS_NOT_SUPPORTED':
+        print("Starting insecure communication")
+
+        communication(c_socket, 'Client', 'Server')
+
+    else:
+        pass
+        #???
+    try:
+        c_socket.close()
+    except:
+        pass
 
 
 if __name__ == '__main__':
