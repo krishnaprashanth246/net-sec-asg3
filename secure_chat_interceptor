@@ -24,17 +24,6 @@ class break_check:
     def get(self):
         return self.flag
 
-def threaded(name, connection):
-    print("Connected with ", name)
-    for conn in client_names:
-        print("connection in list: ", conn)
-    client_names.remove(name)
-    client_list.remove((name, connection))
-    try:
-        connection.shutdown(socket.SHUT_RDWR)
-        connection.close()
-    except:
-        pass
 
 def alice_receiving(conn_alice, conn_bob, tls_check):
     while True:
