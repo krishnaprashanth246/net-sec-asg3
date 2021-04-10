@@ -2,6 +2,7 @@
 #Secure chat application
 import socket
 import sys
+import fcntl
 import time
 from _thread import *
 from datetime import datetime
@@ -9,9 +10,14 @@ import threading
 import subprocess
 import argparse
 import ssl
+import os
 
 PORT = 7129
 RECVSIZE = 1024
+
+def set_nonblocking(fileno):
+    fl = fcntl.fcntl(fileno, fcntl.F_GETFL)
+    return fcntl.fcntl(fileno, fcntl.F_SETFL, fl | os.O_NONBLOCK)
 
 class break_check:
     flag = True
@@ -29,11 +35,13 @@ def receiving(name, connection, active_status):
         if msg == b'':
             print("socket connection broken")
             active_status.unset()
-            return
+            set_nonblocking(sys.stdin.fileno())
+            break
         msg = msg.decode()
         print("\n{} : {}".format(name, msg))
         if msg == 'chat_close':
             #connection.close()
+            set_nonblocking(sys.stdin.fileno())
             active_status.unset()
             break
     #sys.exit()
@@ -61,6 +69,7 @@ def communication(connection, peer1, peer2):
 
 def server():
     s_socket = socket.socket(socket.AF_INET6,type=socket.SOCK_STREAM)
+    s_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s_socket.bind((b'',PORT,0,0))
     print("Server listening on port ",PORT)
     s_socket.listen()

@@ -24,12 +24,14 @@ class break_check:
     def get(self):
         return self.flag
 
-
 def alice_receiving(conn_alice, conn_bob, tls_check):
     while True:
         msg = conn_alice.recv(RECVSIZE)
         if msg == b'':
-            conn_bob.sendall(msg)
+            try:
+                conn_bob.sendall(b'chat_close')
+            except:
+                pass
             print("socket connection broken")
             break
         msg = msg.decode()
@@ -39,7 +41,11 @@ def alice_receiving(conn_alice, conn_bob, tls_check):
             continue
         
         print("\n{} : {}".format("alice", msg))
-        conn_bob.sendall(msg.encode())
+        try:
+            conn_bob.sendall(msg.encode())
+        except Exception as e:
+            print(e)
+            break
         if msg == 'chat_close':
             try:
                 conn_bob.close()
@@ -54,11 +60,19 @@ def bob_receiving(conn_bob, conn_alice):
     while True:
         msg = conn_bob.recv(RECVSIZE)
         if msg == b'':
+            try:
+                conn_alice.send(b'chat_close')
+            except:
+                pass
             print("socket connection broken")
             break
         msg = msg.decode()
         print("\n{} : {}".format("bob", msg))
-        conn_alice.sendall(msg.encode())
+        try:
+            conn_alice.sendall(msg.encode())
+        except Exception as e:
+            print(e)
+            break
         if msg == 'chat_close':
             try:
                 conn_bob.close()
